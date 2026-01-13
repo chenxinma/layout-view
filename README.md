@@ -9,6 +9,60 @@
 - 跳过隐藏和非常隐藏的工作表
 - 输出JSON格式的分析结果
 
+## 安装
+
+确保您已安装 Rust（2024版本）和 Cargo：
+
+```bash
+# 克隆项目
+git clone <repository-url>
+cd layout-view
+
+# 或者直接使用 Cargo 创建新项目
+cargo new layout-view --bin
+```
+
+## 依赖项
+
+- `calamine = "0.32.0"` - 用于读取 Excel 文件的库
+- `serde = { version = "1.0", features = ["derive"] }` - 用于序列化
+- `serde_json = "1.0"` - 用于JSON处理
+
+## 构建和运行
+
+### 构建项目
+```bash
+# 构建项目
+cargo build
+
+# 构建发布版本
+cargo build --release
+```
+
+### 运行测试
+```bash
+# 运行测试
+cargo test
+```
+
+### 运行程序
+```bash
+# 运行程序分析Excel文件
+cargo run -- <xlsx_file_path>
+```
+
+### 其他常用命令
+```bash
+# 检查代码
+cargo check
+
+# 格式化代码
+cargo fmt
+
+# 检查代码风格
+cargo clippy
+```
+
 ## 使用方法
 
 ```bash
@@ -52,3 +106,24 @@ cargo run -- <xlsx_file_path>
 3. 确定有效数据范围（first_row, first_col, end_row, end_col），排除起始的连续空白行列
 4. 统计指定范围内的单元格，将非空白（非空字符串或全空格）单元格计为数据单元格
 5. 计算密度为数据单元格数量除以总单元格数量
+
+## 项目结构
+
+```
+layout-view/
+├── Cargo.toml          # 项目配置和依赖
+├── Cargo.lock          # 锁定依赖版本
+├── src/
+│   ├── lib.rs          # 主要库源代码
+│   └── main.rs         # 命令行程序入口
+├── README.md           # 用户说明文档
+└── IFLOW.md            # 项目文档
+```
+
+## 开发约定
+
+- 使用 2024 版本的 Rust 语言标准
+- 代码应遵循 Rust 的最佳实践和命名约定
+- 测试代码应放在 `#[cfg(test)]` 模块中
+- 使用 `cargo fmt` 保持代码格式一致
+- 使用 `cargo clippy` 保持代码质量

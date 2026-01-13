@@ -1,4 +1,6 @@
 use calamine::{Reader, Xlsx, open_workbook};
+use lazy_static::lazy_static;
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -14,6 +16,17 @@ pub struct SheetDataDensity {
     pub visible: String,  // 添加可见性字段
     pub first_row_first_col_content: Option<String>,  // 采样第一行第一列cell内容
     pub last_row_first_col_content: Option<String>,   // 采样最后一行第一列cell内容
+    pub data_type_mix: f64,  // 数据类型混合程度
+    pub column_data_types: Vec<ColumnDataTypeInfo>,  // 每列的数据类型信息
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct ColumnDataTypeInfo {
+    pub column_index: u32,
+    pub numeric_count: u32,
+    pub text_count: u32,
+    pub total_count: u32,
+    pub numeric_type_ratio: f64,  // 数值型数据占比
 }
 
 pub fn calculate_sheet_density(
@@ -58,15 +71,20 @@ pub fn calculate_sheet_density(
                 visible: format!("{:?}", visible_status), // 记录可见性状态
                 first_row_first_col_content: None,
                 last_row_first_col_content: None,
+                data_type_mix: 0.0,
+                column_data_types: Vec::new(),
             });
             continue;
         }
 
+        // 限制分析前100行
+        let sample_end_row = std::cmp::min(end_row, start_row + 99); // 最多100行 (0-99)
+
         // 计算范围内总单元格数和数据单元格数
-        let total_cells = ((end_row - start_row + 1)) * ((end_col - start_col + 1));
+        let total_cells = ((sample_end_row - start_row + 1)) * ((end_col - start_col + 1));
         let mut data_cells = 0;
 
-        for row in start_row..=end_row {
+        for row in start_row..=sample_end_row {
             for col in start_col..=end_col {
                 if let Some(cell) = range.get_value((row, col)) {
                     // 检查是否为非空数据（非空白或全空格）
@@ -88,21 +106,29 @@ pub fn calculate_sheet_density(
             .map(|cell| cell.to_string());
 
         // 获取最后一行第一列的cell内容
-        let last_row_first_col_content = range.get_value((end_row, start_col))
+        let last_row_first_col_content = range.get_value((sample_end_row, start_col))
             .map(|cell| cell.to_string());
+
+        // 计算每列的数据类型分布
+        let column_data_types = calculate_column_data_types(&range, start_row, sample_end_row, start_col, end_col);
+
+        // 计算数据类型混合程度
+        let data_type_mix = calculate_data_type_mix(&column_data_types);
 
         results.push(SheetDataDensity {
             sheet_name: sheet_name.clone(),
             first_row: start_row,
             first_col: start_col,
-            end_row: end_row,
-            end_col: end_col,
+            end_row: end_row,  // 保留原始end_row
+            end_col: end_col,  // 保留原始end_col
             total_cells,
             data_cells,
             density,
             visible: format!("{:?}", visible_status), // 记录可见性状态
             first_row_first_col_content,
             last_row_first_col_content,
+            data_type_mix,
+            column_data_types,
         });
     }
 
@@ -121,6 +147,133 @@ fn is_empty_cell(cell: &calamine::Data) -> bool {
         calamine::Data::Empty | calamine::Data::Error(_) => true,
         calamine::Data::String(s) => s.trim().is_empty(),
         _ => false,
+    }
+}
+
+// 静态正则表达式，用于匹配数值型数据
+lazy_static! {
+    static ref PERCENTAGE_RE: Regex = Regex::new(r#"^-?\d*\.?\d+%$"#).unwrap();
+    static ref THOUSANDS_RE: Regex = Regex::new(r#"^-?\d{1,3}(,\d{3})*(\.\d+)?$"#).unwrap();
+    static ref NUMBER_RE: Regex = Regex::new(r#"^-?\d+\.?\d*$"#).unwrap();
+}
+
+/// 检查字符串是否为数值型数据
+/// 支持：整数、小数、含千分位数、百分数
+fn is_numeric_string(s: &str) -> bool {
+    let s_trimmed = s.trim();
+    if s_trimmed.is_empty() {
+        return false;
+    }
+
+    // 检查是否为百分数 (例如: 50%, -25.5%)
+    if PERCENTAGE_RE.is_match(s_trimmed) {
+        return true;
+    }
+
+    // 检查是否为含千分位的数字 (例如: 1,234.56, -1,234.56)
+    if THOUSANDS_RE.is_match(s_trimmed) {
+        return true;
+    }
+
+    // 检查是否为普通小数或整数 (例如: 123.45, -67.89, 123, -45)
+    if NUMBER_RE.is_match(s_trimmed) {
+        return true;
+    }
+
+    false
+}
+
+/// 检查单元格是否包含数值型数据
+fn is_numeric_cell(cell: &calamine::Data) -> bool {
+    match cell {
+        calamine::Data::Int(_) | calamine::Data::Float(_) => true,
+        calamine::Data::String(s) => is_numeric_string(s),
+        _ => false,
+    }
+}
+
+/// 计算每列的数据类型分布
+fn calculate_column_data_types(
+    range: &calamine::Range<calamine::Data>,
+    start_row: u32,
+    end_row: u32,
+    start_col: u32,
+    end_col: u32,
+) -> Vec<ColumnDataTypeInfo> {
+    let mut column_info = Vec::new();
+
+    for col in start_col..=end_col {
+        let mut numeric_count = 0;
+        let mut text_count = 0;
+        let mut total_count = 0;
+
+        for row in start_row..=end_row {
+            if let Some(cell) = range.get_value((row, col)) {
+                if !is_empty_cell(cell) {
+                    total_count += 1;
+                    if is_numeric_cell(cell) {
+                        numeric_count += 1;
+                    } else {
+                        // 将非数值型数据视为文本型数据
+                        text_count += 1;
+                    }
+                }
+            }
+        }
+
+        let numeric_type_ratio = if total_count > 0 {
+            numeric_count as f64 / total_count as f64
+        } else {
+            0.0
+        };
+
+        column_info.push(ColumnDataTypeInfo {
+            column_index: col,
+            numeric_count,
+            text_count,
+            total_count,
+            numeric_type_ratio,
+        });
+    }
+
+    column_info
+}
+
+/// 使用多样性指数（香农熵）计算数据类型混合程度
+fn calculate_data_type_mix(column_data_types: &[ColumnDataTypeInfo]) -> f64 {
+    if column_data_types.is_empty() {
+        return 0.0;
+    }
+
+    let mut total_mix = 0.0;
+    let mut valid_columns = 0;
+
+    for col_info in column_data_types {
+        if col_info.total_count > 0 {
+            // 计算香农熵
+            let p_numeric = col_info.numeric_count as f64 / col_info.total_count as f64;
+            let p_text = col_info.text_count as f64 / col_info.total_count as f64;
+
+            let mut entropy = 0.0;
+            if p_numeric > 0.0 {
+                entropy -= p_numeric * p_numeric.ln();
+            }
+            if p_text > 0.0 {
+                entropy -= p_text * p_text.ln();
+            }
+
+            // 标准化熵值 (除以 ln(2) 以确保最大值为 1)
+            let normalized_entropy = if entropy > 0.0 { entropy / 2.0f64.ln() } else { 0.0 };
+            
+            total_mix += normalized_entropy;
+            valid_columns += 1;
+        }
+    }
+
+    if valid_columns > 0 {
+        total_mix / valid_columns as f64
+    } else {
+        0.0
     }
 }
 
@@ -154,11 +307,90 @@ mod tests {
             visible: "Visible".to_string(),
             first_row_first_col_content: Some("Test".to_string()),
             last_row_first_col_content: Some("End".to_string()),
+            data_type_mix: 0.5,
+            column_data_types: vec![ColumnDataTypeInfo {
+                column_index: 0,
+                numeric_count: 5,
+                text_count: 5,
+                total_count: 10,
+                numeric_type_ratio: 0.5,
+            }],
         };
         
         assert_eq!(sheet_data.sheet_name, "Test Sheet");
         assert_eq!(sheet_data.visible, "Visible");
         assert_eq!(sheet_data.first_row_first_col_content, Some("Test".to_string()));
         assert_eq!(sheet_data.last_row_first_col_content, Some("End".to_string()));
+        assert_eq!(sheet_data.data_type_mix, 0.5);
+        assert_eq!(sheet_data.column_data_types.len(), 1);
+        assert_eq!(sheet_data.column_data_types[0].column_index, 0);
+    }
+    
+    #[test]
+    fn test_is_numeric_string() {
+        // 测试正则表达式对数值型数据的识别
+        assert!(is_numeric_string("123"));
+        assert!(is_numeric_string("-45"));
+        assert!(is_numeric_string("3.14"));
+        assert!(is_numeric_string("-2.5"));
+        assert!(is_numeric_string("1,234.56"));
+        assert!(is_numeric_string("-1,234.56"));
+        assert!(is_numeric_string("50%"));
+        assert!(is_numeric_string("-25.5%"));
+        
+        // 测试非数值型数据
+        assert!(!is_numeric_string("text"));
+        assert!(!is_numeric_string(""));
+        assert!(!is_numeric_string("   "));
+        assert!(!is_numeric_string("12.34.56"));
+        assert!(!is_numeric_string("abc123"));
+    }
+    
+    #[test]
+    fn test_calculate_data_type_mix() {
+        // 创建测试数据：包含混合类型的列（数值和文本各占一半）
+        let column_data_types = vec![
+            ColumnDataTypeInfo {
+                column_index: 0,
+                numeric_count: 3,
+                text_count: 3,
+                total_count: 6,
+                numeric_type_ratio: 0.5,
+            },
+            ColumnDataTypeInfo {
+                column_index: 1,
+                numeric_count: 2,
+                text_count: 2,
+                total_count: 4,
+                numeric_type_ratio: 0.5,
+            }
+        ];
+        
+        // 混合的数据应该有较高的熵值
+        let mix = calculate_data_type_mix(&column_data_types);
+        // 由于两列都包含混合数据，混合度应该较高
+        assert!(mix > 0.6, "混合程度应该较高，当前值为: {}", mix);
+        
+        // 创建测试数据：完全一致的列（全数值）
+        let column_data_types = vec![
+            ColumnDataTypeInfo {
+                column_index: 0,
+                numeric_count: 5,
+                text_count: 0,
+                total_count: 5,
+                numeric_type_ratio: 1.0,
+            },
+            ColumnDataTypeInfo {
+                column_index: 1,
+                numeric_count: 5,
+                text_count: 0,
+                total_count: 5,
+                numeric_type_ratio: 1.0,
+            }
+        ];
+        
+        // 完全一致的数据应该有低混合程度
+        let mix = calculate_data_type_mix(&column_data_types);
+        assert!(mix < 0.1, "混合程度应该较低，当前值为: {}", mix);
     }
 }

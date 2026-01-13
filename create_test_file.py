@@ -5,7 +5,7 @@ import sys
 
 try:
     import xlsxwriter
-    workbook = xlsxwriter.Workbook('test_data.xlsx')
+    workbook = xlsxwriter.Workbook('./files/test_data.xlsx')
     
     # 工作表1：表格数据
     worksheet1 = workbook.add_worksheet('Data Sheet')
