@@ -3,7 +3,7 @@ use lazy_static::lazy_static;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct SheetDataDensity {
     pub sheet_name: String,
     pub first_row: u32,
@@ -20,13 +20,27 @@ pub struct SheetDataDensity {
     pub column_data_types: Vec<ColumnDataTypeInfo>,  // 每列的数据类型信息
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ColumnDataTypeInfo {
     pub column_index: u32,
     pub numeric_count: u32,
     pub text_count: u32,
     pub total_count: u32,
     pub numeric_type_ratio: f64,  // 数值型数据占比
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub enum SheetType {
+    Data,   // 行列表
+    Form,   // 表单
+    Unknown, // 无法确定
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct ClassifiedSheet {
+    pub original: SheetDataDensity,
+    pub sheet_type: SheetType,
+    pub classification_reason: String,  // 分类原因说明
 }
 
 pub fn calculate_sheet_density(
@@ -275,6 +289,56 @@ fn calculate_data_type_mix(column_data_types: &[ColumnDataTypeInfo]) -> f64 {
     } else {
         0.0
     }
+}
+
+/// 根据密度和数据类型混合度对工作表进行分类
+pub fn classify_sheet(sheet_data: &SheetDataDensity) -> ClassifiedSheet {
+    // 忽略density=0的sheet
+    if sheet_data.density == 0.0 {
+        return ClassifiedSheet {
+            original: sheet_data.clone(),
+            sheet_type: SheetType::Unknown,
+            classification_reason: "Density is zero".to_string(),
+        };
+    }
+
+    // 基于数据分析得出的阈值
+    // 主要基于密度判断，但考虑数据类型混合度作为辅助因素
+    let sheet_type = if sheet_data.density > 0.46 {
+        SheetType::Data  // 高密度 => 行列表
+    } else if sheet_data.density <= 0.46 && sheet_data.data_type_mix > 0.35 {
+        // 密度低但数据类型混合度高，可能是一个复杂的数据表
+        // 例如 "ArgoDB权限统计" 表，虽然密度略低但混合度高，应视为数据表
+        SheetType::Data
+    } else {
+        SheetType::Form  // 低密度且低数据类型混合度 => 表单
+    };
+
+    let reason = format!(
+        "density: {:.3}, data_type_mix: {:.3}",
+        sheet_data.density,
+        sheet_data.data_type_mix
+    );
+
+    ClassifiedSheet {
+        original: sheet_data.clone(),
+        sheet_type,
+        classification_reason: reason,
+    }
+}
+
+/// 对整个Excel文件的所有工作表进行分类（忽略density=0的sheet）
+pub fn classify_excel_sheets(xlsx_path: &str) -> Result<Vec<ClassifiedSheet>, Box<dyn std::error::Error>> {
+    let sheets = calculate_sheet_density(xlsx_path)?;
+    
+    // 对每个sheet进行分类，忽略density=0的sheet
+    let classified_sheets: Vec<ClassifiedSheet> = sheets
+        .into_iter()
+        .map(|sheet| classify_sheet(&sheet))
+        .filter(|classified| classified.original.density != 0.0) // 过滤掉密度为0的sheet
+        .collect();
+    
+    Ok(classified_sheets)
 }
 
 #[cfg(test)]
