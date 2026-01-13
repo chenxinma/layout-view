@@ -63,12 +63,12 @@ pub fn calculate_sheet_density(
         }
 
         // 计算范围内总单元格数和数据单元格数
-        let total_cells = ((end_row - start_row + 1) as u32) * ((end_col - start_col + 1) as u32);
+        let total_cells = ((end_row - start_row + 1)) * ((end_col - start_col + 1));
         let mut data_cells = 0;
 
         for row in start_row..=end_row {
             for col in start_col..=end_col {
-                if let Some(cell) = range.get_value((row as u32, col as u32)) {
+                if let Some(cell) = range.get_value((row, col)) {
                     // 检查是否为非空数据（非空白或全空格）
                     if !is_empty_cell(cell) {
                         data_cells += 1;
@@ -84,19 +84,19 @@ pub fn calculate_sheet_density(
         };
 
         // 获取第一行第一列的cell内容
-        let first_row_first_col_content = range.get_value((start_row as u32, start_col as u32))
+        let first_row_first_col_content = range.get_value((start_row, start_col))
             .map(|cell| cell.to_string());
 
         // 获取最后一行第一列的cell内容
-        let last_row_first_col_content = range.get_value((end_row as u32, start_col as u32))
+        let last_row_first_col_content = range.get_value((end_row, start_col))
             .map(|cell| cell.to_string());
 
         results.push(SheetDataDensity {
             sheet_name: sheet_name.clone(),
-            first_row: start_row as u32,
-            first_col: start_col as u32,
-            end_row: end_row as u32,
-            end_col: end_col as u32,
+            first_row: start_row,
+            first_col: start_col,
+            end_row: end_row,
+            end_col: end_col,
             total_cells,
             data_cells,
             density,
@@ -113,7 +113,7 @@ fn get_effective_range(range: &calamine::Range<calamine::Data>) -> (u32, u32, u3
     let Some((start_row, start_col)) = range.start() else { return (0,0,0,0) };
     let Some((end_row, end_col)) = range.end() else { return (0,0,0,0) };
 
-    return (start_row, start_col, end_row, end_col)
+    (start_row, start_col, end_row, end_col)
 }
 
 fn is_empty_cell(cell: &calamine::Data) -> bool {
