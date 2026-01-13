@@ -2,3 +2,4 @@
 Cargo.lock
 
 /files
+test_c_interface

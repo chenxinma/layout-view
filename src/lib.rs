@@ -2,6 +2,9 @@ use calamine::{Reader, Xlsx, open_workbook};
 use lazy_static::lazy_static;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
+use std::ffi::{CString, CStr};
+use std::os::raw::c_char;
+// use libc;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct SheetDataDensity {
@@ -339,6 +342,47 @@ pub fn classify_excel_sheets(xlsx_path: &str) -> Result<Vec<ClassifiedSheet>, Bo
         .collect();
     
     Ok(classified_sheets)
+}
+
+// C FFI functions for use as a dynamic library from Python
+
+/// C function to classify Excel sheets and return results as JSON string
+/// The caller is responsible for freeing the returned string using free_c_string
+#[no_mangle]
+pub unsafe extern "C" fn classify_excel_sheets_c(xlsx_path: *const c_char) -> *mut c_char {
+    if xlsx_path.is_null() {
+        return std::ptr::null_mut();
+    }
+
+    let path_c_str = unsafe {
+        match CStr::from_ptr(xlsx_path).to_str() {
+            Ok(s) => s,
+            Err(_) => return std::ptr::null_mut(),
+        }
+    };
+
+    match classify_excel_sheets(path_c_str) {
+        Ok(results) => {
+            match serde_json::to_string(&results) {
+                Ok(json_string) => {
+                    match CString::new(json_string) {
+                        Ok(c_string) => c_string.into_raw(),
+                        Err(_) => std::ptr::null_mut(),
+                    }
+                }
+                Err(_) => std::ptr::null_mut(),
+            }
+        }
+        Err(_) => std::ptr::null_mut(),
+    }
+}
+
+/// C function to free strings allocated by Rust
+#[no_mangle]
+pub unsafe extern "C" fn free_c_string(ptr: *mut c_char) {
+    if !ptr.is_null() {
+        let _ = unsafe { CString::from_raw(ptr) };
+    }
 }
 
 #[cfg(test)]
