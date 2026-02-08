@@ -97,43 +97,41 @@ cargo run -- <xlsx_file_path>
 ```json
 [
   {
-    "original": {
-      "sheet_name": "Data Sheet",
-      "first_row": 0,
-      "first_col": 0,
-      "end_row": 3,
-      "end_col": 2,
-      "total_cells": 12,
-      "data_cells": 9,
-      "density": 0.75,
-      "visible": "Visible",
-      "first_row_first_col_content": "ID",
-      "last_row_first_col_content": "4",
-      "data_type_mix": 0.8,
-      "column_data_types": [
-        {
-          "column_index": 0,
-          "numeric_count": 4,
-          "text_count": 0,
-          "total_count": 4,
-          "numeric_type_ratio": 1.0
-        },
-        {
-          "column_index": 1,
-          "numeric_count": 4,
-          "text_count": 0,
-          "total_count": 4,
-          "numeric_type_ratio": 1.0
-        },
-        {
-          "column_index": 2,
-          "numeric_count": 0,
-          "text_count": 4,
-          "total_count": 4,
-          "numeric_type_ratio": 0.0
-        }
-      ]
-    },
+    "sheet_name": "Data Sheet",
+    "first_row": 0,
+    "first_col": 0,
+    "end_row": 3,
+    "end_col": 2,
+    "total_cells": 12,
+    "data_cells": 9,
+    "density": 0.75,
+    "visible": "Visible",
+    "first_row_first_col_content": "ID",
+    "last_row_first_col_content": "4",
+    "data_type_mix": 0.8,
+    "column_data_types": [
+      {
+        "column_index": 0,
+        "numeric_count": 4,
+        "text_count": 0,
+        "total_count": 4,
+        "numeric_type_ratio": 1.0
+      },
+      {
+        "column_index": 1,
+        "numeric_count": 4,
+        "text_count": 0,
+        "total_count": 4,
+        "numeric_type_ratio": 1.0
+      },
+      {
+        "column_index": 2,
+        "numeric_count": 0,
+        "text_count": 4,
+        "total_count": 4,
+        "numeric_type_ratio": 0.0
+      }
+    ],
     "sheet_type": "Data",
     "classification_reason": "density: 0.750, data_type_mix: 0.800"
   }

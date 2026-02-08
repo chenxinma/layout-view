@@ -21,6 +21,8 @@ pub struct SheetDataDensity {
     pub last_row_first_col_content: Option<String>,  // 采样最后一行第一列cell内容
     pub data_type_mix: f64,                          // 数据类型混合程度
     pub column_data_types: Vec<ColumnDataTypeInfo>,  // 每列的数据类型信息
+    pub row_type_consistency: f64,                   // 行间类型一致性（0-1，越高越一致）
+    pub aspect_ratio: f64,                           // 宽高比（行数/列数）
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -54,6 +56,8 @@ pub struct ClassifiedSheet {
     pub last_row_first_col_content: Option<String>,  // 采样最后一行第一列cell内容
     pub data_type_mix: f64,                          // 数据类型混合程度
     pub column_data_types: Vec<ColumnDataTypeInfo>,  // 每列的数据类型信息
+    pub row_type_consistency: f64,                   // 行间类型一致性（0-1，越高越一致）
+    pub aspect_ratio: f64,                           // 宽高比（行数/列数）
     pub sheet_type: SheetType,
     pub classification_reason: String, // 分类原因说明
 }
@@ -103,6 +107,8 @@ pub fn calculate_sheet_density(
                 last_row_first_col_content: None,
                 data_type_mix: 0.0,
                 column_data_types: Vec::new(),
+                row_type_consistency: 0.0,
+                aspect_ratio: 0.0,
             });
             continue;
         }
@@ -148,6 +154,19 @@ pub fn calculate_sheet_density(
         // 计算数据类型混合程度
         let data_type_mix = calculate_data_type_mix(&column_data_types);
 
+        // 计算行间类型一致性
+        let row_type_consistency =
+            calculate_row_type_consistency(&range, start_row, sample_end_row, start_col, end_col);
+
+        // 计算宽高比
+        let row_count = (sample_end_row - start_row + 1) as f64;
+        let col_count = (end_col - start_col + 1) as f64;
+        let aspect_ratio = if col_count > 0.0 {
+            row_count / col_count
+        } else {
+            0.0
+        };
+
         results.push(SheetDataDensity {
             sheet_name: sheet_name.clone(),
             first_row: start_row,
@@ -162,6 +181,8 @@ pub fn calculate_sheet_density(
             last_row_first_col_content,
             data_type_mix,
             column_data_types,
+            row_type_consistency,
+            aspect_ratio,
         });
     }
 
@@ -318,7 +339,64 @@ fn calculate_data_type_mix(column_data_types: &[ColumnDataTypeInfo]) -> f64 {
     }
 }
 
-/// 根据密度和数据类型混合度对工作表进行分类
+/// 计算行间类型一致性
+/// 通过计算每行的数值型占比，然后统计这些占比的标准差
+/// 标准差越小，表示行间类型模式越一致（数据表特征）
+fn calculate_row_type_consistency(
+    range: &calamine::Range<calamine::Data>,
+    start_row: u32,
+    end_row: u32,
+    start_col: u32,
+    end_col: u32,
+) -> f64 {
+    if start_row > end_row {
+        return 0.0;
+    }
+
+    let mut row_numeric_ratios = Vec::new();
+
+    for row in start_row..=end_row {
+        let mut numeric_count = 0;
+        let mut total_count = 0;
+
+        for col in start_col..=end_col {
+            if let Some(cell) = range.get_value((row, col)) {
+                if !is_empty_cell(cell) {
+                    total_count += 1;
+                    if is_numeric_cell(cell) {
+                        numeric_count += 1;
+                    }
+                }
+            }
+        }
+
+        if total_count > 0 {
+            let ratio = numeric_count as f64 / total_count as f64;
+            row_numeric_ratios.push(ratio);
+        }
+    }
+
+    if row_numeric_ratios.len() < 2 {
+        return 0.0;
+    }
+
+    // 计算标准差
+    let mean = row_numeric_ratios.iter().sum::<f64>() / row_numeric_ratios.len() as f64;
+    let variance = row_numeric_ratios
+        .iter()
+        .map(|&x| (x - mean).powi(2))
+        .sum::<f64>()
+        / row_numeric_ratios.len() as f64;
+    let std_dev = variance.sqrt();
+
+    // 将标准差转换为一致性分数（0-1）
+    // 标准差越小，一致性越高
+    // 使用 sigmoid 函数映射：consistency = 1 / (1 + std_dev * 2)
+    let consistency = 1.0 / (1.0 + std_dev * 3.0);
+    consistency
+}
+
+/// 根据密度、数据类型混合度、行间类型一致性和宽高比对工作表进行分类
 pub fn classify_sheet(sheet_data: &SheetDataDensity) -> ClassifiedSheet {
     // 忽略density=0的sheet
     if sheet_data.density == 0.0 {
@@ -336,26 +414,54 @@ pub fn classify_sheet(sheet_data: &SheetDataDensity) -> ClassifiedSheet {
             last_row_first_col_content: sheet_data.last_row_first_col_content.clone(),
             data_type_mix: sheet_data.data_type_mix,
             column_data_types: sheet_data.column_data_types.clone(),
+            row_type_consistency: sheet_data.row_type_consistency,
+            aspect_ratio: sheet_data.aspect_ratio,
             sheet_type: SheetType::Unknown,
             classification_reason: "Density is zero".to_string(),
         };
     }
 
-    // 基于数据分析得出的阈值
-    // 主要基于密度判断，但考虑数据类型混合度作为辅助因素
-    let sheet_type = if sheet_data.density > 0.46 {
-        SheetType::Data // 高密度 => 行列表
-    } else if sheet_data.density <= 0.46 && sheet_data.data_type_mix > 0.35 {
-        // 密度低但数据类型混合度高，可能是一个复杂的数据表
-        // 例如 "ArgoDB权限统计" 表，虽然密度略低但混合度高，应视为数据表
+    // 综合分类逻辑
+    // 1. 极高密度 -> 数据表
+    // 2. 高密度 + 高行一致性 + 列数较多 -> 数据表
+    // 3. 宽高比 > 5 + 列数 <= 4 -> 表单（垂直排列的键值对表单）
+    // 4. 宽表特征（多列+扁平）-> 数据表
+    // 5. 低密度 + 高混合度 + 列数较多 -> 数据表
+    // 6. 其他情况根据混合度判断
+    let col_count = sheet_data.end_col - sheet_data.first_col + 1;
+
+    let sheet_type = if sheet_data.density > 0.70 {
+        // 极高密度几乎肯定是数据表
+        SheetType::Data
+    } else if sheet_data.aspect_ratio > 4.0 && col_count <= 4 && sheet_data.density > 0.35 {
+        // 高瘦结构 + 少列 + 中等密度 -> 表单（垂直键值对表单）
+        SheetType::Form
+    } else if sheet_data.density > 0.46 && col_count > 4 && sheet_data.row_type_consistency > 0.50 {
+        // 高密度、多列、行一致性中等以上 -> 数据表
+        SheetType::Data
+    } else if sheet_data.density > 0.40 && sheet_data.row_type_consistency > 0.80 {
+        // 行结构高度一致且密度中等以上 -> 数据表（需要更高的一致性阈值）
+        SheetType::Data
+    } else if col_count > 10 && sheet_data.aspect_ratio < 0.5 && sheet_data.density > 0.35 {
+        // 宽表特征：列数多(>10) + 宽高比低(<0.5) + 密度中等以上 -> 数据表
+        SheetType::Data
+    } else if sheet_data.density > 0.46 && sheet_data.data_type_mix > 0.35 {
+        // 原逻辑：高密度且数据类型混合度高
+        SheetType::Data
+    } else if sheet_data.density > 0.35 && sheet_data.data_type_mix > 0.35 && col_count > 5 {
+        // 密度中等 + 数据类型混合度高 + 列数较多 -> 数据表
         SheetType::Data
     } else {
-        SheetType::Form // 低密度且低数据类型混合度 => 表单
+        // 其他情况视为表单
+        SheetType::Form
     };
 
     let reason = format!(
-        "density: {:.3}, data_type_mix: {:.3}",
-        sheet_data.density, sheet_data.data_type_mix
+        "density: {:.3}, data_type_mix: {:.3}, row_consistency: {:.3}, aspect_ratio: {:.1}",
+        sheet_data.density,
+        sheet_data.data_type_mix,
+        sheet_data.row_type_consistency,
+        sheet_data.aspect_ratio
     );
 
     ClassifiedSheet {
@@ -372,6 +478,8 @@ pub fn classify_sheet(sheet_data: &SheetDataDensity) -> ClassifiedSheet {
         last_row_first_col_content: sheet_data.last_row_first_col_content.clone(),
         data_type_mix: sheet_data.data_type_mix,
         column_data_types: sheet_data.column_data_types.clone(),
+        row_type_consistency: sheet_data.row_type_consistency,
+        aspect_ratio: sheet_data.aspect_ratio,
         sheet_type,
         classification_reason: reason,
     }
@@ -468,6 +576,8 @@ mod tests {
                 total_count: 10,
                 numeric_type_ratio: 0.5,
             }],
+            row_type_consistency: 0.7,
+            aspect_ratio: 1.0,
         };
 
         assert_eq!(sheet_data.sheet_name, "Test Sheet");
