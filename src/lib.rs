@@ -41,7 +41,19 @@ pub enum SheetType {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct ClassifiedSheet {
-    pub original: SheetDataDensity,
+    pub sheet_name: String,
+    pub first_row: u32,
+    pub first_col: u32,
+    pub end_row: u32,
+    pub end_col: u32,
+    pub total_cells: u32,
+    pub data_cells: u32,
+    pub density: f64,
+    pub visible: String,                             // 添加可见性字段
+    pub first_row_first_col_content: Option<String>, // 采样第一行第一列cell内容
+    pub last_row_first_col_content: Option<String>,  // 采样最后一行第一列cell内容
+    pub data_type_mix: f64,                          // 数据类型混合程度
+    pub column_data_types: Vec<ColumnDataTypeInfo>,  // 每列的数据类型信息
     pub sheet_type: SheetType,
     pub classification_reason: String, // 分类原因说明
 }
@@ -311,7 +323,19 @@ pub fn classify_sheet(sheet_data: &SheetDataDensity) -> ClassifiedSheet {
     // 忽略density=0的sheet
     if sheet_data.density == 0.0 {
         return ClassifiedSheet {
-            original: sheet_data.clone(),
+            sheet_name: sheet_data.sheet_name.clone(),
+            first_row: sheet_data.first_row,
+            first_col: sheet_data.first_col,
+            end_row: sheet_data.end_row,
+            end_col: sheet_data.end_col,
+            total_cells: sheet_data.total_cells,
+            data_cells: sheet_data.data_cells,
+            density: sheet_data.density,
+            visible: sheet_data.visible.clone(),
+            first_row_first_col_content: sheet_data.first_row_first_col_content.clone(),
+            last_row_first_col_content: sheet_data.last_row_first_col_content.clone(),
+            data_type_mix: sheet_data.data_type_mix,
+            column_data_types: sheet_data.column_data_types.clone(),
             sheet_type: SheetType::Unknown,
             classification_reason: "Density is zero".to_string(),
         };
@@ -335,7 +359,19 @@ pub fn classify_sheet(sheet_data: &SheetDataDensity) -> ClassifiedSheet {
     );
 
     ClassifiedSheet {
-        original: sheet_data.clone(),
+        sheet_name: sheet_data.sheet_name.clone(),
+        first_row: sheet_data.first_row,
+        first_col: sheet_data.first_col,
+        end_row: sheet_data.end_row,
+        end_col: sheet_data.end_col,
+        total_cells: sheet_data.total_cells,
+        data_cells: sheet_data.data_cells,
+        density: sheet_data.density,
+        visible: sheet_data.visible.clone(),
+        first_row_first_col_content: sheet_data.first_row_first_col_content.clone(),
+        last_row_first_col_content: sheet_data.last_row_first_col_content.clone(),
+        data_type_mix: sheet_data.data_type_mix,
+        column_data_types: sheet_data.column_data_types.clone(),
         sheet_type,
         classification_reason: reason,
     }
@@ -351,7 +387,7 @@ pub fn classify_excel_sheets(
     let classified_sheets: Vec<ClassifiedSheet> = sheets
         .into_iter()
         .map(|sheet| classify_sheet(&sheet))
-        .filter(|classified| classified.original.density != 0.0) // 过滤掉密度为0的sheet
+        .filter(|classified| classified.density != 0.0) // 过滤掉密度为0的sheet
         .collect();
 
     Ok(classified_sheets)
