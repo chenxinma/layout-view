@@ -1,4 +1,4 @@
-use layout_view::{classify_excel_sheets};
+use layout_view::classify_excel_sheets;
 use std::env;
 use std::process;
 
