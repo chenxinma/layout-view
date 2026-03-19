@@ -436,6 +436,9 @@ pub fn classify_sheet(sheet_data: &SheetDataDensity) -> ClassifiedSheet {
     } else if sheet_data.aspect_ratio > 4.0 && col_count <= 4 && sheet_data.density > 0.35 {
         // 高瘦结构 + 少列 + 中等密度 -> 表单（垂直键值对表单）
         SheetType::Form
+    } else if sheet_data.aspect_ratio < 1.2 && col_count > 5 && sheet_data.density > 0.35 {
+        // 宽扁结构 + 多列 + 中等密度 -> 数据表（列数>=行数，典型的行列表特征）
+        SheetType::Data
     } else if sheet_data.density > 0.46 && col_count > 4 && sheet_data.row_type_consistency > 0.50 {
         // 高密度、多列、行一致性中等以上 -> 数据表
         SheetType::Data

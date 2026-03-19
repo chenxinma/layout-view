@@ -4,3 +4,4 @@ Cargo.lock
 /files
 test_c_interface
 nul
+tests/test4_data.xlsx
